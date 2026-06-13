@@ -8,7 +8,7 @@ integration point is wired up (see README's "Open Integration Points"),
 
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime
 
 from config.settings import settings
 from detection.risk_score import RiskScore
