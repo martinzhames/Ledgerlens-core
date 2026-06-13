@@ -15,6 +15,7 @@ from config.settings import settings
 from detection.feature_engineering import build_feature_vector
 from detection.model_inference import load_models, score_feature_vector
 from detection.risk_score import RiskScore
+from detection.storage import save_scores
 from ingestion.account_loader import load_account_metadata
 from ingestion.historical_loader import load_historical_trades
 from ingestion.operations_loader import load_order_book_events
@@ -64,6 +65,7 @@ def run(asset_pairs: list[tuple[str | None, str | None]] | None = None) -> list[
             scores.append(score)
 
     logger.info("Computed %d risk scores", len(scores))
+    save_scores(scores)
     return scores
 
 
