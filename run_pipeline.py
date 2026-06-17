@@ -8,6 +8,7 @@ the other repos in the org.
 """
 
 import logging
+from datetime import timedelta
 
 import pandas as pd
 
@@ -18,7 +19,7 @@ from detection.risk_score import RiskScore
 from detection.storage import save_scores
 from ingestion.account_loader import load_account_metadata
 from ingestion.historical_loader import load_historical_trades
-from ingestion.operations_loader import load_order_book_events
+from ingestion.operations_loader import load_order_book_events_for_pair
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ledgerlens.pipeline")
@@ -31,7 +32,9 @@ def run(asset_pairs: list[tuple[str | None, str | None]] | None = None) -> list[
     `CODE:ISSUER` form (None for native XLM). Defaults to a single
     XLM/USDC pair for local testing.
     """
-    asset_pairs = asset_pairs or [(None, "USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN")]
+    asset_pairs = asset_pairs or [
+        (None, "USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN")
+    ]
     models = load_models()
     scores: list[RiskScore] = []
 
@@ -44,13 +47,20 @@ def run(asset_pairs: list[tuple[str | None, str | None]] | None = None) -> list[
         as_of = pd.Timestamp(trades["ledger_close_time"].max())
         accounts = pd.unique(trades[["base_account", "counter_account"]].values.ravel())
         account_metadata = load_account_metadata(list(accounts))
+        all_order_book_events = load_order_book_events_for_pair(
+            base_asset,
+            counter_asset,
+            since=as_of.to_pydatetime() - timedelta(days=settings.trade_history_lookback_days),
+        )
+        order_book_events = pd.DataFrame([e.model_dump() for e in all_order_book_events])
 
         for account in accounts:
-            order_book_events = pd.DataFrame(
-                [e.model_dump() for e in load_order_book_events(account)]
-            )
             features = build_feature_vector(
-                trades, account, as_of, order_book_events=order_book_events, account_metadata=account_metadata
+                trades,
+                account,
+                as_of,
+                order_book_events=order_book_events,
+                account_metadata=account_metadata,
             )
             probability, confidence = score_feature_vector(models, features)
 

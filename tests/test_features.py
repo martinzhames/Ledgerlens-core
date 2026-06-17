@@ -205,6 +205,41 @@ def test_order_cancellation_rate():
     assert order_cancellation_rate(empty, "A") == 0.0
 
 
+def test_build_feature_vector_uses_order_cancellation_events():
+    trades = _sample_trades()
+    trades["base_asset"] = [{"code": "XLM", "issuer": None}] * len(trades)
+    trades["counter_asset"] = [{"code": "USDC", "issuer": "GISSUER"}] * len(trades)
+    as_of = pd.Timestamp("2026-06-12T00:00:00Z")
+    events = pd.DataFrame(
+        [
+            {
+                "id": "1",
+                "timestamp": as_of - pd.Timedelta(minutes=10),
+                "account": "A",
+                "asset_pair": "XLM/USDC",
+                "side": "sell",
+                "amount": 100.0,
+                "price": 0.1,
+                "event_type": "created",
+            },
+            {
+                "id": "2",
+                "timestamp": as_of - pd.Timedelta(minutes=9),
+                "account": "A",
+                "asset_pair": "XLM/USDC",
+                "side": "sell",
+                "amount": 0.0,
+                "price": 0.1,
+                "event_type": "cancelled",
+            },
+        ]
+    )
+
+    features = build_feature_vector(trades, "A", as_of, order_book_events=events)
+
+    assert features["order_cancellation_rate"] > 0.0
+
+
 def test_build_feature_vector_returns_all_feature_names():
     trades = _sample_trades()
     trades["base_asset"] = [{"code": "XLM", "issuer": None}] * len(trades)

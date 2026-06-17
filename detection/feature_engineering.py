@@ -272,7 +272,7 @@ def build_feature_vector(
 
     `trades` should already be filtered to the relevant asset pair / time
     range covering the largest rolling window. `order_book_events` (from
-    `ingestion.operations_loader.load_order_book_events`) and
+    `ingestion.operations_loader.load_order_book_events_for_pair`) and
     `account_metadata` (from `ingestion.account_loader.load_account_metadata`)
     are optional; omitting them yields `0.0` for the features that depend
     on them rather than raising.

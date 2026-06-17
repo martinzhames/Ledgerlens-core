@@ -32,13 +32,21 @@ def test_run_persists_scores(model_dir, monkeypatch):
         n_normal_accounts=3, n_wash_rings=1, ring_size=2, trades_per_normal=4, trades_per_wash=4
     )
 
+    calls = []
+
+    def fake_load_order_book_events_for_pair(base_asset, counter_asset, since):
+        calls.append((base_asset, counter_asset, since))
+        return []
+
     monkeypatch.setattr(run_pipeline, "load_historical_trades", lambda **kwargs: trades)
     monkeypatch.setattr(run_pipeline, "load_account_metadata", lambda accounts: account_metadata)
-    monkeypatch.setattr(run_pipeline, "load_order_book_events", lambda account: [])
+    monkeypatch.setattr(run_pipeline, "load_order_book_events_for_pair", fake_load_order_book_events_for_pair)
 
     scores = run_pipeline.run(asset_pairs=[(None, "USDC:ISSUER")])
 
     accounts = pd.unique(trades[["base_account", "counter_account"]].values.ravel())
+    assert len(calls) == 1
+    assert calls[0][:2] == (None, "USDC:ISSUER")
     assert len(scores) == len(accounts)
     for s in scores:
         assert 0 <= s.score <= 100
