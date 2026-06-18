@@ -19,10 +19,9 @@ import logging
 from collections import defaultdict
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 
-from api.auth import require_admin_key
 from config.settings import settings
 from detection.amm_engine import pool_risk_from_trade_rows
 from detection.risk_score import RiskScore
@@ -204,26 +203,6 @@ def circular_path_payments(
 ) -> list[dict]:
     """Return detected atomic circular path-payment routes, paginated."""
     return get_circular_routes(limit=limit, offset=offset)
-
-
-# ---------------------------------------------------------------------------
-# Model observability — drift reports and retrain runs (admin-key gated)
-# ---------------------------------------------------------------------------
-
-
-@app.get("/admin/drift-reports", dependencies=[Depends(require_admin_key)])
-def drift_reports(limit: int = Query(default=50, ge=1, le=1000)) -> list[dict]:
-    """Return the most recent drift checks recorded by `cli.py retrain-check`."""
-    return get_drift_reports(limit=limit)
-
-
-@app.get("/admin/retrain-runs", dependencies=[Depends(require_admin_key)])
-def retrain_runs(
-    limit: int = Query(default=50, ge=1, le=1000),
-    model_name: str | None = Query(default=None, description="Filter by model, e.g. random_forest"),
-) -> list[dict]:
-    """Return the most recent per-model retrain outcomes recorded by `cli.py retrain-check`."""
-    return get_retrain_runs(limit=limit, model_name=model_name)
 
 
 # ---------------------------------------------------------------------------
