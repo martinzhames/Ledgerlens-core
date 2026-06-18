@@ -15,7 +15,9 @@ Run with:
 """
 
 import json
+import logging
 from collections import defaultdict
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
@@ -23,19 +25,38 @@ from pydantic import BaseModel
 from config.settings import settings
 from detection.amm_engine import pool_risk_from_trade_rows
 from detection.risk_score import RiskScore
-from detection.storage import (
-    get_circular_routes,
-    get_latest_scores,
-    get_liquidity_pool_trades,
-    get_pair_correlations,
-)
+from detection.storage import get_latest_scores, get_pair_correlations, get_shap_values
 from detection.webhook_queue import get_dead_letters
 from detection.webhook_registry import deactivate_subscriber, list_subscribers, register_subscriber
+
+logger = logging.getLogger("ledgerlens.api")
+
+# ---------------------------------------------------------------------------
+# Model loading — done once at startup so request handlers stay fast.
+# ---------------------------------------------------------------------------
+
+_models: dict = {}
+
+
+@asynccontextmanager
+async def _lifespan(application: FastAPI):
+    """Load trained models at startup; release nothing at shutdown."""
+    global _models
+    try:
+        from detection.model_inference import load_models
+        _models = load_models(settings.model_dir)
+        logger.info("Loaded %d model(s) from %s", len(_models), settings.model_dir)
+    except FileNotFoundError:
+        logger.warning("No trained models found in %s — /explain will return 503", settings.model_dir)
+        _models = {}
+    yield
+
 
 app = FastAPI(
     title="LedgerLens (local)",
     description="Local read-only API serving RiskScore records from the detection engine.",
     version="0.1.0",
+    lifespan=_lifespan,
 )
 
 
@@ -81,6 +102,32 @@ def list_scores(
     )
     return [s for s in scores if s.score >= min_score]
 
+
+
+@app.get("/scores/{wallet}/explain")
+def explain_wallet_score(
+    wallet: str,
+    asset_pair: str = Query(..., description="Asset pair to explain, e.g. XLM/USDC"),
+) -> list[dict]:
+    """Return the top-5 SHAP feature contributions for ``wallet`` on ``asset_pair``.
+
+    Response schema: list of ``{"feature": str, "shap_value": float}`` ordered
+    by absolute SHAP contribution descending.
+
+    - **200** — cache hit: returns up to 5 feature contributions.
+    - **404** — no SHAP cache found for the given wallet / asset pair combination.
+    - **503** — models were not loaded at startup (run the training pipeline first).
+    """
+    if not _models:
+        raise HTTPException(status_code=503, detail="Models not loaded")
+
+    cached = get_shap_values(wallet=wallet, asset_pair=asset_pair)
+    if cached is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No SHAP cache found for wallet {wallet} on {asset_pair}",
+        )
+    return cached
 
 
 @app.get("/scores/{wallet}", response_model=list[RiskScore])

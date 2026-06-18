@@ -414,3 +414,138 @@ def test_correlations_returns_only_latest_run(client, monkeypatch):
     pairs = {(r["pair_a"], r["pair_b"]) for r in body}
     assert ("XLM/USDC", "XLM/yXLM") in pairs
     assert ("XLM/USDC", "XLM/AQUA") not in pairs
+
+
+# ---------------------------------------------------------------------------
+# /scores/{wallet}/explain endpoint
+# ---------------------------------------------------------------------------
+
+
+def _seed_shap(db_path: str, wallet: str = "GABC", asset_pair: str = "XLM/USDC") -> list[dict]:
+    """Write a feature vector + SHAP cache and return the shap payload."""
+    from detection.storage import save_feature_vectors, save_shap_values
+
+    features = {"benford_mad_24h": 0.02, "round_trip_trade_frequency": 0.1}
+    save_feature_vectors([{"wallet": wallet, "asset_pair": asset_pair, "features": features}], db_path)
+
+    shap_payload = [
+        {"feature": "benford_mad_24h", "shap_value": 0.40},
+        {"feature": "round_trip_trade_frequency", "shap_value": -0.25},
+        {"feature": "network_centrality", "shap_value": 0.15},
+        {"feature": "off_hours_activity_ratio", "shap_value": -0.08},
+        {"feature": "volume_spike_frequency", "shap_value": 0.05},
+    ]
+    save_shap_values(wallet, asset_pair, shap_payload, db_path)
+    return shap_payload
+
+
+@pytest.fixture
+def client_with_models(tmp_path, monkeypatch):
+    """TestClient whose lifespan loads a dummy (but non-empty) models dict."""
+    import importlib
+
+    db_path = str(tmp_path / "ledgerlens.db")
+    monkeypatch.setenv("LEDGERLENS_DB_PATH", db_path)
+
+    import config.settings as settings_module
+
+    object.__setattr__(settings_module.settings, "db_path", db_path)
+
+    # Patch load_models so the lifespan succeeds without real model files.
+    import detection.model_inference as mi
+
+    monkeypatch.setattr(mi, "load_models", lambda *a, **kw: {"xgboost": object()})
+
+    import api.main as main_module
+
+    importlib.reload(main_module)
+
+    from fastapi.testclient import TestClient
+
+    with TestClient(main_module.app) as c:
+        yield c, db_path
+
+
+@pytest.fixture
+def client_no_models(tmp_path, monkeypatch):
+    """TestClient whose lifespan finds no models (load_models raises FileNotFoundError)."""
+    import importlib
+
+    db_path = str(tmp_path / "ledgerlens.db")
+    monkeypatch.setenv("LEDGERLENS_DB_PATH", db_path)
+
+    import config.settings as settings_module
+
+    object.__setattr__(settings_module.settings, "db_path", db_path)
+
+    import detection.model_inference as mi
+
+    def _raise(*a, **kw):
+        raise FileNotFoundError("no models")
+
+    monkeypatch.setattr(mi, "load_models", _raise)
+
+    import api.main as main_module
+
+    importlib.reload(main_module)
+
+    from fastapi.testclient import TestClient
+
+    with TestClient(main_module.app) as c:
+        yield c, db_path
+
+
+def test_explain_returns_top5_in_descending_abs_order(client_with_models):
+    client, db_path = client_with_models
+    _seed_shap(db_path)
+
+    resp = client.get("/scores/GABC/explain?asset_pair=XLM%2FUSDC")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert len(body) == 5
+    abs_values = [abs(item["shap_value"]) for item in body]
+    assert abs_values == sorted(abs_values, reverse=True), "Items must be ordered by |shap_value| desc"
+    assert body[0]["feature"] == "benford_mad_24h"
+
+
+def test_explain_404_for_unknown_wallet(client_with_models):
+    client, _ = client_with_models
+    resp = client.get("/scores/GUNKNOWN/explain?asset_pair=XLM%2FUSDC")
+    assert resp.status_code == 404
+
+
+def test_explain_404_when_no_shap_cache(client_with_models):
+    """Feature vector exists but no SHAP values have been computed yet."""
+    client, db_path = client_with_models
+    from detection.storage import save_feature_vectors
+
+    save_feature_vectors(
+        [{"wallet": "GABC", "asset_pair": "XLM/USDC", "features": {"benford_mad_24h": 0.02}}],
+        db_path,
+    )
+    resp = client.get("/scores/GABC/explain?asset_pair=XLM%2FUSDC")
+    assert resp.status_code == 404
+
+
+def test_explain_503_when_models_not_loaded(client_no_models):
+    client, db_path = client_no_models
+    _seed_shap(db_path)
+    resp = client.get("/scores/GABC/explain?asset_pair=XLM%2FUSDC")
+    assert resp.status_code == 503
+    assert "Models not loaded" in resp.json()["detail"]
+
+
+def test_explain_response_time_under_100ms(client_with_models):
+    """Cache-hit response must be served in < 100 ms."""
+    import time
+
+    client, db_path = client_with_models
+    _seed_shap(db_path)
+
+    start = time.monotonic()
+    resp = client.get("/scores/GABC/explain?asset_pair=XLM%2FUSDC")
+    elapsed_ms = (time.monotonic() - start) * 1000
+
+    assert resp.status_code == 200
+    assert elapsed_ms < 100, f"Response took {elapsed_ms:.1f} ms — expected < 100 ms"

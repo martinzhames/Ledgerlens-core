@@ -87,51 +87,18 @@ _MIGRATIONS: list[tuple[int, str, str]] = [
     ),
     (
         3,
-        "add AMM pool trade, path payment, and circular route tables",
+        "add feature_vectors table with shap cache",
         """
-        CREATE TABLE IF NOT EXISTS liquidity_pool_trades (
+        CREATE TABLE IF NOT EXISTS feature_vectors (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            trade_id TEXT NOT NULL,
-            pool_id TEXT NOT NULL,
-            base_account TEXT NOT NULL,
-            base_asset_pair TEXT NOT NULL,
-            counter_asset_pair TEXT NOT NULL,
-            base_amount REAL NOT NULL,
-            counter_amount REAL NOT NULL,
-            base_is_seller INTEGER NOT NULL,
+            wallet TEXT NOT NULL,
+            asset_pair TEXT NOT NULL,
+            features_json TEXT NOT NULL,
+            shap_json TEXT,
             timestamp TEXT NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS idx_lp_trades_pool_id ON liquidity_pool_trades (pool_id);
-        CREATE INDEX IF NOT EXISTS idx_lp_trades_base_account ON liquidity_pool_trades (base_account);
-
-        CREATE TABLE IF NOT EXISTS path_payments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            payment_id TEXT NOT NULL,
-            transaction_hash TEXT NOT NULL,
-            source_account TEXT NOT NULL,
-            destination_account TEXT NOT NULL,
-            source_asset_pair TEXT NOT NULL,
-            destination_asset_pair TEXT NOT NULL,
-            source_amount REAL NOT NULL,
-            destination_amount REAL NOT NULL,
-            hop_count INTEGER NOT NULL,
-            strict_send INTEGER NOT NULL,
-            timestamp TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_path_payments_source ON path_payments (source_account);
-        CREATE INDEX IF NOT EXISTS idx_path_payments_tx_hash ON path_payments (transaction_hash);
-
-        CREATE TABLE IF NOT EXISTS circular_path_routes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            transaction_hash TEXT NOT NULL,
-            accounts_json TEXT NOT NULL,
-            hop_count INTEGER NOT NULL,
-            cycle_volume REAL NOT NULL,
-            is_atomic_self_payment INTEGER NOT NULL,
-            touches_pool INTEGER NOT NULL,
-            timestamp TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_circular_routes_tx_hash ON circular_path_routes (transaction_hash);
+        CREATE INDEX IF NOT EXISTS idx_feature_vectors_wallet ON feature_vectors (wallet);
+        CREATE INDEX IF NOT EXISTS idx_feature_vectors_asset_pair ON feature_vectors (asset_pair);
         """,
     ),
 ]
@@ -474,176 +441,110 @@ def get_pair_correlations(db_path: str | None = None) -> list[dict]:
     ]
 
 
-def _asset_pair_symbol(asset: dict) -> str:
-    code = asset["code"]
-    issuer = asset.get("issuer")
-    return code if issuer is None else f"{code}:{issuer}"
+def save_feature_vectors(vectors: list[dict], db_path: str | None = None) -> None:
+    """Persist a list of feature vector dicts to the ``feature_vectors`` table.
 
-
-def save_liquidity_pool_trades(pool_trades: pd.DataFrame, db_path: str | None = None) -> None:
-    """Persist AMM pool trades (`trade_type == LIQUIDITY_POOL`) from the latest pipeline run.
-
-    `pool_trades` is a `Trade`-shaped DataFrame (as built from `Trade.model_dump()`
-    records) already filtered to pool trades.
+    Each dict must contain ``wallet``, ``asset_pair``, and ``features``
+    (the raw feature dict produced by ``build_feature_vector``).
     """
-    if pool_trades.empty:
-        return
-    init_db(db_path)
-    with _connect(db_path) as conn:
-        conn.executemany(
-            """
-            INSERT INTO liquidity_pool_trades
-                (trade_id, pool_id, base_account, base_asset_pair, counter_asset_pair,
-                 base_amount, counter_amount, base_is_seller, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                (
-                    row["id"],
-                    row["liquidity_pool_id"],
-                    row["base_account"],
-                    _asset_pair_symbol(row["base_asset"]),
-                    _asset_pair_symbol(row["counter_asset"]),
-                    row["base_amount"],
-                    row["counter_amount"],
-                    int(row["base_is_seller"]),
-                    pd.Timestamp(row["ledger_close_time"]).isoformat(),
-                )
-                for _, row in pool_trades.iterrows()
-            ],
-        )
-        conn.commit()
-
-
-def get_liquidity_pool_trades(
-    pool_id: str,
-    limit: int | None = None,
-    offset: int = 0,
-    db_path: str | None = None,
-) -> list[dict]:
-    """Return stored trades against `pool_id`, most recent first, paginated."""
-    init_db(db_path)
-    query = """
-        SELECT base_account, base_asset_pair, counter_asset_pair, base_amount,
-               counter_amount, base_is_seller, timestamp
-        FROM liquidity_pool_trades
-        WHERE pool_id = ?
-        ORDER BY timestamp DESC
-    """
-    params: list = [pool_id]
-    if limit is not None:
-        query += " LIMIT ? OFFSET ?"
-        params.extend([limit, offset])
-
-    with _connect(db_path) as conn:
-        rows = conn.execute(query, tuple(params)).fetchall()
-
-    return [
-        {
-            "base_account": row[0],
-            "base_asset_pair": row[1],
-            "counter_asset_pair": row[2],
-            "base_amount": row[3],
-            "counter_amount": row[4],
-            "base_is_seller": bool(row[5]),
-            "timestamp": row[6],
-        }
-        for row in rows
-    ]
-
-
-def save_path_payments(payments: list[PathPayment], db_path: str | None = None) -> None:
-    """Persist raw ingested path payments."""
-    if not payments:
-        return
-    init_db(db_path)
-    with _connect(db_path) as conn:
-        conn.executemany(
-            """
-            INSERT INTO path_payments
-                (payment_id, transaction_hash, source_account, destination_account,
-                 source_asset_pair, destination_asset_pair, source_amount, destination_amount,
-                 hop_count, strict_send, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                (
-                    p.id,
-                    p.transaction_hash,
-                    p.source_account,
-                    p.destination_account,
-                    p.source_asset.pair_symbol,
-                    p.destination_asset.pair_symbol,
-                    p.source_amount,
-                    p.destination_amount,
-                    len(p.path) + 1,
-                    int(p.strict_send),
-                    p.timestamp.isoformat(),
-                )
-                for p in payments
-            ],
-        )
-        conn.commit()
-
-
-def save_circular_routes(routes: list[dict], db_path: str | None = None) -> None:
-    """Persist `detect_atomic_circular_routes` output from the latest pipeline run."""
-    if not routes:
+    if not vectors:
         return
     init_db(db_path)
     ts = datetime.now(timezone.utc).isoformat()
     with _connect(db_path) as conn:
         conn.executemany(
             """
-            INSERT INTO circular_path_routes
-                (transaction_hash, accounts_json, hop_count, cycle_volume,
-                 is_atomic_self_payment, touches_pool, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO feature_vectors (wallet, asset_pair, features_json, timestamp)
+            VALUES (?, ?, ?, ?)
             """,
             [
                 (
-                    r["transaction_hash"],
-                    json.dumps(r["accounts"]),
-                    r["hop_count"],
-                    r["cycle_volume"],
-                    int(r["is_atomic_self_payment"]),
-                    int(r["touches_pool"]),
+                    v["wallet"],
+                    v["asset_pair"],
+                    json.dumps(v["features"]),
                     ts,
                 )
-                for r in routes
+                for v in vectors
             ],
         )
         conn.commit()
 
 
-def get_circular_routes(
-    limit: int | None = None,
-    offset: int = 0,
+def get_feature_vector(
+    wallet: str,
+    asset_pair: str,
     db_path: str | None = None,
-) -> list[dict]:
-    """Return detected circular path-payment routes, most recent first, paginated."""
+) -> dict | None:
+    """Return the most recent feature dict for ``wallet`` / ``asset_pair``, or ``None``."""
     init_db(db_path)
-    query = "SELECT transaction_hash, accounts_json, hop_count, cycle_volume, is_atomic_self_payment, touches_pool, timestamp FROM circular_path_routes ORDER BY timestamp DESC"
-    params: list = []
-    if limit is not None:
-        query += " LIMIT ? OFFSET ?"
-        params.extend([limit, offset])
-
     with _connect(db_path) as conn:
-        rows = conn.execute(query, tuple(params)).fetchall()
+        row = conn.execute(
+            """
+            SELECT features_json FROM feature_vectors
+            WHERE wallet = ? AND asset_pair = ?
+            ORDER BY timestamp DESC
+            LIMIT 1
+            """,
+            (wallet, asset_pair),
+        ).fetchone()
+    if row is None:
+        return None
+    return json.loads(row[0])
 
-    return [
-        {
-            "transaction_hash": row[0],
-            "accounts": json.loads(row[1]),
-            "hop_count": row[2],
-            "cycle_volume": row[3],
-            "is_atomic_self_payment": bool(row[4]),
-            "touches_pool": bool(row[5]),
-            "timestamp": row[6],
-        }
-        for row in rows
-    ]
+
+def save_shap_values(
+    wallet: str,
+    asset_pair: str,
+    shap_values: list[dict],
+    db_path: str | None = None,
+) -> None:
+    """Persist SHAP values for the most recent ``feature_vectors`` row for the pair.
+
+    ``shap_values`` must be a list of ``{"feature": str, "shap_value": float}``
+    dicts ordered by absolute contribution descending (top-5).
+    """
+    init_db(db_path)
+    shap_json = json.dumps(shap_values)
+    with _connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE feature_vectors SET shap_json = ?
+            WHERE id = (
+                SELECT id FROM feature_vectors
+                WHERE wallet = ? AND asset_pair = ?
+                ORDER BY timestamp DESC
+                LIMIT 1
+            )
+            """,
+            (shap_json, wallet, asset_pair),
+        )
+        conn.commit()
+
+
+def get_shap_values(
+    wallet: str,
+    asset_pair: str,
+    db_path: str | None = None,
+) -> list[dict] | None:
+    """Return the cached SHAP values for ``wallet`` / ``asset_pair``, or ``None``.
+
+    Returns a list of ``{"feature": str, "shap_value": float}`` dicts ordered
+    by absolute contribution descending, or ``None`` if no cache entry exists.
+    """
+    init_db(db_path)
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT shap_json FROM feature_vectors
+            WHERE wallet = ? AND asset_pair = ?
+            ORDER BY timestamp DESC
+            LIMIT 1
+            """,
+            (wallet, asset_pair),
+        ).fetchone()
+    if row is None or row[0] is None:
+        return None
+    return json.loads(row[0])
 
 
 if __name__ == "__main__":
