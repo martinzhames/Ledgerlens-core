@@ -19,8 +19,11 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
+import pandas as pd
+
 from config.settings import settings
 from detection.risk_score import RiskScore
+from ingestion.data_models import PathPayment
 
 
 class SchemaMigrationError(RuntimeError):
@@ -100,32 +103,51 @@ _MIGRATIONS: list[tuple[int, str, str]] = [
     ),
     (
         4,
-        "add drift_reports and retrain_runs tables for model governance",
+        "add AMM pool trade, path payment, and circular route tables",
         """
-        CREATE TABLE IF NOT EXISTS drift_reports (
+        CREATE TABLE IF NOT EXISTS liquidity_pool_trades (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            triggered_at TEXT NOT NULL,
-            drift_detected INTEGER NOT NULL,
-            psi_report_json TEXT NOT NULL,
-            psi_threshold REAL NOT NULL,
-            min_drifted_features INTEGER NOT NULL
+            trade_id TEXT NOT NULL,
+            pool_id TEXT NOT NULL,
+            base_account TEXT NOT NULL,
+            base_asset_pair TEXT NOT NULL,
+            counter_asset_pair TEXT NOT NULL,
+            base_amount REAL NOT NULL,
+            counter_amount REAL NOT NULL,
+            base_is_seller INTEGER NOT NULL,
+            timestamp TEXT NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS idx_drift_reports_triggered_at ON drift_reports (triggered_at);
+        CREATE INDEX IF NOT EXISTS idx_lp_trades_pool_id ON liquidity_pool_trades (pool_id);
+        CREATE INDEX IF NOT EXISTS idx_lp_trades_base_account ON liquidity_pool_trades (base_account);
 
-        CREATE TABLE IF NOT EXISTS retrain_runs (
+        CREATE TABLE IF NOT EXISTS path_payments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            triggered_at TEXT NOT NULL,
-            drift_report_id INTEGER REFERENCES drift_reports(id),
-            model_name TEXT NOT NULL,
-            old_version TEXT,
-            new_version TEXT,
-            old_auc_roc REAL,
-            new_auc_roc REAL,
-            promoted INTEGER NOT NULL,
-            forced INTEGER NOT NULL
+            payment_id TEXT NOT NULL,
+            transaction_hash TEXT NOT NULL,
+            source_account TEXT NOT NULL,
+            destination_account TEXT NOT NULL,
+            source_asset_pair TEXT NOT NULL,
+            destination_asset_pair TEXT NOT NULL,
+            source_amount REAL NOT NULL,
+            destination_amount REAL NOT NULL,
+            hop_count INTEGER NOT NULL,
+            strict_send INTEGER NOT NULL,
+            timestamp TEXT NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS idx_retrain_runs_triggered_at ON retrain_runs (triggered_at);
-        CREATE INDEX IF NOT EXISTS idx_retrain_runs_model_name ON retrain_runs (model_name);
+        CREATE INDEX IF NOT EXISTS idx_path_payments_source ON path_payments (source_account);
+        CREATE INDEX IF NOT EXISTS idx_path_payments_tx_hash ON path_payments (transaction_hash);
+
+        CREATE TABLE IF NOT EXISTS circular_path_routes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            transaction_hash TEXT NOT NULL,
+            accounts_json TEXT NOT NULL,
+            hop_count INTEGER NOT NULL,
+            cycle_volume REAL NOT NULL,
+            is_atomic_self_payment INTEGER NOT NULL,
+            touches_pool INTEGER NOT NULL,
+            timestamp TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_circular_routes_tx_hash ON circular_path_routes (transaction_hash);
         """,
     ),
 ]
@@ -574,139 +596,176 @@ def get_shap_values(
     return json.loads(row[0])
 
 
-def save_drift_report(
-    drift_detected: bool,
-    psi_report: dict,
-    psi_threshold: float,
-    min_drifted_features: int,
-    db_path: str | None = None,
-) -> int:
-    """Persist a drift report; returns its row id (used as retrain_runs.drift_report_id)."""
+def _asset_pair_symbol(asset: dict) -> str:
+    code = asset["code"]
+    issuer = asset.get("issuer")
+    return code if issuer is None else f"{code}:{issuer}"
+
+
+def save_liquidity_pool_trades(pool_trades: pd.DataFrame, db_path: str | None = None) -> None:
+    """Persist AMM pool trades (`trade_type == LIQUIDITY_POOL`) from the latest pipeline run.
+
+    `pool_trades` is a `Trade`-shaped DataFrame (as built from `Trade.model_dump()`
+    records) already filtered to pool trades.
+    """
+    if pool_trades.empty:
+        return
     init_db(db_path)
     with _connect(db_path) as conn:
-        cursor = conn.execute(
+        conn.executemany(
             """
-            INSERT INTO drift_reports
-                (triggered_at, drift_detected, psi_report_json, psi_threshold, min_drifted_features)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                datetime.now(timezone.utc).isoformat(),
-                int(drift_detected),
-                json.dumps(psi_report),
-                psi_threshold,
-                min_drifted_features,
-            ),
-        )
-        conn.commit()
-        return cursor.lastrowid
-
-
-def _row_to_drift_report(row: tuple) -> dict:
-    return {
-        "id": row[0],
-        "triggered_at": row[1],
-        "drift_detected": bool(row[2]),
-        "psi_report": json.loads(row[3]),
-        "psi_threshold": row[4],
-        "min_drifted_features": row[5],
-    }
-
-
-def get_drift_reports(limit: int = 50, db_path: str | None = None) -> list[dict]:
-    """Most recent drift reports first."""
-    init_db(db_path)
-    with _connect(db_path) as conn:
-        rows = conn.execute(
-            """
-            SELECT id, triggered_at, drift_detected, psi_report_json, psi_threshold, min_drifted_features
-            FROM drift_reports
-            ORDER BY triggered_at DESC, id DESC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
-    return [_row_to_drift_report(row) for row in rows]
-
-
-def save_retrain_run(
-    drift_report_id: int | None,
-    model_name: str,
-    old_version: str | None,
-    new_version: str | None,
-    old_auc_roc: float | None,
-    new_auc_roc: float | None,
-    promoted: bool,
-    forced: bool,
-    db_path: str | None = None,
-) -> None:
-    """Persist a single model's retrain outcome for one retrain-check run."""
-    init_db(db_path)
-    with _connect(db_path) as conn:
-        conn.execute(
-            """
-            INSERT INTO retrain_runs
-                (triggered_at, drift_report_id, model_name, old_version, new_version,
-                 old_auc_roc, new_auc_roc, promoted, forced)
+            INSERT INTO liquidity_pool_trades
+                (trade_id, pool_id, base_account, base_asset_pair, counter_asset_pair,
+                 base_amount, counter_amount, base_is_seller, timestamp)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (
-                datetime.now(timezone.utc).isoformat(),
-                drift_report_id,
-                model_name,
-                old_version,
-                new_version,
-                old_auc_roc,
-                new_auc_roc,
-                int(promoted),
-                int(forced),
-            ),
+            [
+                (
+                    row["id"],
+                    row["liquidity_pool_id"],
+                    row["base_account"],
+                    _asset_pair_symbol(row["base_asset"]),
+                    _asset_pair_symbol(row["counter_asset"]),
+                    row["base_amount"],
+                    row["counter_amount"],
+                    int(row["base_is_seller"]),
+                    pd.Timestamp(row["ledger_close_time"]).isoformat(),
+                )
+                for _, row in pool_trades.iterrows()
+            ],
         )
         conn.commit()
 
 
-def _row_to_retrain_run(row: tuple) -> dict:
-    return {
-        "id": row[0],
-        "triggered_at": row[1],
-        "drift_report_id": row[2],
-        "model_name": row[3],
-        "old_version": row[4],
-        "new_version": row[5],
-        "old_auc_roc": row[6],
-        "new_auc_roc": row[7],
-        "promoted": bool(row[8]),
-        "forced": bool(row[9]),
-    }
-
-
-def get_retrain_runs(
-    limit: int = 50,
-    model_name: str | None = None,
+def get_liquidity_pool_trades(
+    pool_id: str,
+    limit: int | None = None,
+    offset: int = 0,
     db_path: str | None = None,
 ) -> list[dict]:
-    """Most recent retrain runs first, optionally filtered by ``model_name``."""
+    """Return stored trades against `pool_id`, most recent first, paginated."""
     init_db(db_path)
-    where = ""
-    params: list = []
-    if model_name is not None:
-        where = "WHERE model_name = ?"
-        params.append(model_name)
-    params.append(limit)
+    query = """
+        SELECT base_account, base_asset_pair, counter_asset_pair, base_amount,
+               counter_amount, base_is_seller, timestamp
+        FROM liquidity_pool_trades
+        WHERE pool_id = ?
+        ORDER BY timestamp DESC
+    """
+    params: list = [pool_id]
+    if limit is not None:
+        query += " LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
 
     with _connect(db_path) as conn:
-        rows = conn.execute(
-            f"""
-            SELECT id, triggered_at, drift_report_id, model_name, old_version, new_version,
-                   old_auc_roc, new_auc_roc, promoted, forced
-            FROM retrain_runs
-            {where}
-            ORDER BY triggered_at DESC, id DESC
-            LIMIT ?
+        rows = conn.execute(query, tuple(params)).fetchall()
+
+    return [
+        {
+            "base_account": row[0],
+            "base_asset_pair": row[1],
+            "counter_asset_pair": row[2],
+            "base_amount": row[3],
+            "counter_amount": row[4],
+            "base_is_seller": bool(row[5]),
+            "timestamp": row[6],
+        }
+        for row in rows
+    ]
+
+
+def save_path_payments(payments: list[PathPayment], db_path: str | None = None) -> None:
+    """Persist raw ingested path payments."""
+    if not payments:
+        return
+    init_db(db_path)
+    with _connect(db_path) as conn:
+        conn.executemany(
+            """
+            INSERT INTO path_payments
+                (payment_id, transaction_hash, source_account, destination_account,
+                 source_asset_pair, destination_asset_pair, source_amount, destination_amount,
+                 hop_count, strict_send, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            tuple(params),
-        ).fetchall()
-    return [_row_to_retrain_run(row) for row in rows]
+            [
+                (
+                    p.id,
+                    p.transaction_hash,
+                    p.source_account,
+                    p.destination_account,
+                    p.source_asset.pair_symbol,
+                    p.destination_asset.pair_symbol,
+                    p.source_amount,
+                    p.destination_amount,
+                    len(p.path) + 1,
+                    int(p.strict_send),
+                    p.timestamp.isoformat(),
+                )
+                for p in payments
+            ],
+        )
+        conn.commit()
+
+
+def save_circular_routes(routes: list[dict], db_path: str | None = None) -> None:
+    """Persist `detect_atomic_circular_routes` output from the latest pipeline run."""
+    if not routes:
+        return
+    init_db(db_path)
+    ts = datetime.now(timezone.utc).isoformat()
+    with _connect(db_path) as conn:
+        conn.executemany(
+            """
+            INSERT INTO circular_path_routes
+                (transaction_hash, accounts_json, hop_count, cycle_volume,
+                 is_atomic_self_payment, touches_pool, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    r["transaction_hash"],
+                    json.dumps(r["accounts"]),
+                    r["hop_count"],
+                    r["cycle_volume"],
+                    int(r["is_atomic_self_payment"]),
+                    int(r["touches_pool"]),
+                    ts,
+                )
+                for r in routes
+            ],
+        )
+        conn.commit()
+
+
+def get_circular_routes(
+    limit: int | None = None,
+    offset: int = 0,
+    db_path: str | None = None,
+) -> list[dict]:
+    """Return detected circular path-payment routes, most recent first, paginated."""
+    init_db(db_path)
+    query = "SELECT transaction_hash, accounts_json, hop_count, cycle_volume, is_atomic_self_payment, touches_pool, timestamp FROM circular_path_routes ORDER BY timestamp DESC"
+    params: list = []
+    if limit is not None:
+        query += " LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+
+    with _connect(db_path) as conn:
+        rows = conn.execute(query, tuple(params)).fetchall()
+
+    return [
+        {
+            "transaction_hash": row[0],
+            "accounts": json.loads(row[1]),
+            "hop_count": row[2],
+            "cycle_volume": row[3],
+            "is_atomic_self_payment": bool(row[4]),
+            "touches_pool": bool(row[5]),
+            "timestamp": row[6],
+        }
+        for row in rows
+    ]
 
 
 if __name__ == "__main__":
