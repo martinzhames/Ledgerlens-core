@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 from sklearn.ensemble import RandomForestClassifier
 
-import detection.model_inference as model_inference
+import config.settings as settings_module
 from detection.feature_engineering import FEATURE_NAMES
 from detection.model_inference import load_models, score_feature_matrix, score_feature_vector
 
@@ -61,7 +61,7 @@ class FixedProbabilityModel:
 
 def test_score_feature_vector_uses_runtime_settings_weights(monkeypatch):
     monkeypatch.setattr(
-        model_inference,
+        settings_module,
         "settings",
         SimpleNamespace(ensemble_weight_rf=0.0, ensemble_weight_xgb=1.0, ensemble_weight_lgbm=0.0),
     )
@@ -81,7 +81,7 @@ def test_score_feature_vector_uses_runtime_settings_weights(monkeypatch):
 
 def test_score_feature_vector_normalizes_non_unit_weights(monkeypatch):
     monkeypatch.setattr(
-        model_inference,
+        settings_module,
         "settings",
         SimpleNamespace(ensemble_weight_rf=2.0, ensemble_weight_xgb=1.0, ensemble_weight_lgbm=0.0),
     )
@@ -140,7 +140,7 @@ def test_score_feature_matrix_returns_one_result_per_vector():
 def test_score_feature_matrix_consistent_with_per_vector(monkeypatch):
     """Batch scores must match per-vector scores exactly."""
     weights = SimpleNamespace(ensemble_weight_rf=0.25, ensemble_weight_xgb=0.50, ensemble_weight_lgbm=0.25)
-    monkeypatch.setattr(model_inference, "settings", weights)
+    monkeypatch.setattr(settings_module, "settings", weights)
 
     models = {
         "random_forest": FixedProbabilityMatrixModel(0.3),
@@ -159,7 +159,7 @@ def test_score_feature_matrix_consistent_with_per_vector(monkeypatch):
 
 def test_score_feature_matrix_full_agreement_gives_max_confidence(monkeypatch):
     monkeypatch.setattr(
-        model_inference,
+        settings_module,
         "settings",
         SimpleNamespace(ensemble_weight_rf=1.0, ensemble_weight_xgb=1.0, ensemble_weight_lgbm=1.0),
     )
@@ -175,7 +175,7 @@ def test_score_feature_matrix_full_agreement_gives_max_confidence(monkeypatch):
 
 def test_score_feature_matrix_raises_when_all_weights_zero(monkeypatch):
     monkeypatch.setattr(
-        model_inference,
+        settings_module,
         "settings",
         SimpleNamespace(ensemble_weight_rf=0.0, ensemble_weight_xgb=0.0, ensemble_weight_lgbm=0.0),
     )
