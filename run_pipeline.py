@@ -24,7 +24,14 @@ from detection.feature_engineering import build_feature_vector
 from detection.model_inference import load_models, score_feature_matrix, score_feature_vector
 from detection.path_payment_engine import detect_atomic_circular_routes
 from detection.risk_score import RiskScore
-from detection.storage import save_feature_vectors, save_pair_correlations, save_scores
+from detection.storage import (
+    save_circular_routes,
+    save_feature_vectors,
+    save_liquidity_pool_trades,
+    save_pair_correlations,
+    save_path_payments,
+    save_scores,
+)
 from detection.shap_explainer import explain_score, top_contributing_features
 from ingestion.account_loader import async_load_account_metadata, load_account_metadata
 from ingestion.data_models import TradeType

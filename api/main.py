@@ -25,7 +25,13 @@ from pydantic import BaseModel
 from config.settings import settings
 from detection.amm_engine import pool_risk_from_trade_rows
 from detection.risk_score import RiskScore
-from detection.storage import get_latest_scores, get_pair_correlations, get_shap_values
+from detection.storage import (
+    get_circular_routes,
+    get_latest_scores,
+    get_liquidity_pool_trades,
+    get_pair_correlations,
+    get_shap_values,
+)
 from detection.webhook_queue import get_dead_letters
 from detection.webhook_registry import deactivate_subscriber, list_subscribers, register_subscriber
 
