@@ -830,3 +830,76 @@ def test_health_503_missing_model(tmp_path):
         object.__setattr__(settings_module.settings, "db_path", orig_db)
         object.__setattr__(settings_module.settings, "model_dir", orig_model)
 
+
+
+# ---------------------------------------------------------------------------
+# POST /feedback — adaptive reweighting feedback endpoint
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def admin_client(tmp_path, monkeypatch):
+    """Client with admin key configured."""
+    db_path = str(tmp_path / "ledgerlens.db")
+    monkeypatch.setenv("LEDGERLENS_DB_PATH", db_path)
+    monkeypatch.setenv("LEDGERLENS_ADMIN_API_KEY", "test-admin-key")
+
+    import config.settings as settings_module
+
+    object.__setattr__(settings_module.settings, "db_path", db_path)
+    object.__setattr__(settings_module.settings, "admin_api_key", "test-admin-key")
+
+    from api.main import app
+
+    return TestClient(app)
+
+
+def test_feedback_returns_403_without_admin_key(admin_client):
+    response = admin_client.post(
+        "/feedback",
+        headers={"X-LedgerLens-Admin-Key": "wrong-key"},
+        json={"wallet": "GABC", "asset_pair": "XLM/USDC", "ground_truth": 1, "scored_at": "2026-01-01T00:00:00Z"},
+    )
+    assert response.status_code == 403
+
+
+def test_feedback_returns_404_for_unknown_wallet(admin_client):
+    response = admin_client.post(
+        "/feedback",
+        headers={"X-LedgerLens-Admin-Key": "test-admin-key"},
+        json={"wallet": "GUNKNOWN", "asset_pair": "XLM/USDC", "ground_truth": 1, "scored_at": "2026-01-01T00:00:00Z"},
+    )
+    assert response.status_code == 404
+
+
+def test_feedback_returns_recorded_3_for_known_wallet(admin_client, tmp_path):
+    """POST /feedback returns {recorded: 3} when the score record exists."""
+    from datetime import datetime, timezone
+
+    import config.settings as settings_module
+    from detection.storage import save_scores
+
+    scored_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    score = RiskScore(
+        wallet="GKNOWN",
+        asset_pair="XLM/USDC",
+        score=85,
+        benford_flag=True,
+        ml_flag=True,
+        confidence=90,
+        timestamp=scored_at,
+    )
+    save_scores([score], settings_module.settings.db_path)
+
+    response = admin_client.post(
+        "/feedback",
+        headers={"X-LedgerLens-Admin-Key": "test-admin-key"},
+        json={
+            "wallet": "GKNOWN",
+            "asset_pair": "XLM/USDC",
+            "ground_truth": 1,
+            "scored_at": scored_at.isoformat(),
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == {"recorded": 3}
