@@ -368,6 +368,48 @@ def db_migrate(
         typer.echo(f"Database already at latest schema version {after}. No migrations applied.")
 
 
+@app.command("reweight")
+def reweight(
+    days_back: int = typer.Option(7, "--days-back", help="Feedback window in days"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print proposed weights without writing"),
+) -> None:
+    """Update ensemble weights from recent feedback using Bayesian Model Averaging.
+
+    Loads the last *days_back* days of scoring feedback, computes updated
+    weights via :func:`detection.ensemble_reweighter.compute_updated_weights`,
+    and (unless ``--dry-run``) writes them to ``models/ensemble_weights.json``.
+    """
+    from config.settings import settings
+    from detection.ensemble_reweighter import apply_weights, compute_updated_weights
+    from detection.feedback_store import get_recent_feedback
+
+    feedback = get_recent_feedback(days_back=days_back)
+    logger.info("Loaded %d feedback records from the last %d days", len(feedback), days_back)
+
+    current = {
+        "random_forest": settings.ensemble_weight_rf,
+        "xgboost": settings.ensemble_weight_xgb,
+        "lightgbm": settings.ensemble_weight_lgbm,
+    }
+    proposed = compute_updated_weights(feedback)
+
+    header = f"{'Model':<20} {'Current':>10} {'Proposed':>10}"
+    divider = "─" * len(header)
+    typer.echo(divider)
+    typer.echo(header)
+    typer.echo(divider)
+    for model in ("random_forest", "xgboost", "lightgbm"):
+        typer.echo(f"{model:<20} {current[model]:>10.4f} {proposed[model]:>10.4f}")
+    typer.echo(divider)
+
+    if dry_run:
+        typer.echo("Dry run — ensemble_weights.json not written.")
+        return
+
+    apply_weights(proposed, settings.model_dir)
+    typer.echo("Wrote updated weights to ensemble_weights.json")
+
+
 @app.command("webhook-worker")
 def webhook_worker(
     interval: float = typer.Option(5.0, "--interval", help="Poll interval in seconds"),
