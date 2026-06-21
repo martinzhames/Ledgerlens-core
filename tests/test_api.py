@@ -10,37 +10,44 @@ from detection.risk_score import RiskScore
 from detection.storage import save_scores
 
 
-def test_robustness_endpoint_no_report(monkeypatch):
-    # allow admin access for tests
-    def _noop(*args, **kwargs):
+def test_robustness_endpoint_no_report():
+    def _noop():
         return None
 
-    monkeypatch.setattr("api.auth.require_admin_key", _noop)
+    from api.main import require_admin_key
+    app.dependency_overrides[require_admin_key] = _noop
     client = TestClient(app)
-    # when no report exists, return 404
-    resp = client.get("/admin/robustness-report")
-    assert resp.status_code == 404 or resp.status_code == 200
+    try:
+        # when no report exists, return 404
+        resp = client.get("/admin/robustness-report")
+        assert resp.status_code == 404 or resp.status_code == 200
+    finally:
+        app.dependency_overrides.clear()
 
 
-def test_robustness_endpoint_with_report(monkeypatch):
-    def _noop(*args, **kwargs):
+def test_robustness_endpoint_with_report():
+    def _noop():
         return None
 
-    monkeypatch.setattr("api.auth.require_admin_key", _noop)
+    from api.main import require_admin_key
+    app.dependency_overrides[require_admin_key] = _noop
     client = TestClient(app)
-    # ensure a report exists by checking storage; compute_robustness_report persists one in its call
-    from detection.robustness_eval import compute_robustness_report
-    from tests.test_robustness_eval import make_df
-    from tests.test_adversarial_attack import DummyModel
+    try:
+        # ensure a report exists by checking storage; compute_robustness_report persists one in its call
+        from detection.robustness_eval import compute_robustness_report
+        from tests.test_robustness_eval import make_df
+        from tests.test_adversarial_attack import DummyModel
 
-    models = {"dummy": DummyModel(w=5.0, b=-1.0)}
-    df = make_df()
-    compute_robustness_report(models, df, n_samples=10, epsilon=0.05, steps=3, seed=2)
+        models = {"dummy": DummyModel(w=5.0, b=-1.0)}
+        df = make_df()
+        compute_robustness_report(models, df, n_samples=10, epsilon=0.05, steps=3, seed=2)
 
-    resp = client.get("/admin/robustness-report")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "model_version" in data
+        resp = client.get("/admin/robustness-report")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "model_version" in data
+    finally:
+        app.dependency_overrides.clear()
 
 
 @pytest.fixture(autouse=True)
