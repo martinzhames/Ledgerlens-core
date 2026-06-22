@@ -13,6 +13,7 @@ import pandas as pd
 
 from detection.amm_engine import pool_round_trip_ratio, pool_share_concentration
 from detection.benford_engine import compute_benford_metrics
+from detection.causal_engine import estimate_pdc
 from detection.path_payment_engine import detect_atomic_circular_routes
 from detection.sandwich_engine import detect_sandwich_candidates
 from ingestion.data_models import LiquidityPool, PathPayment, TradeType
@@ -543,6 +544,8 @@ def build_feature_vector(
     pool_deposits: dict[str, pd.DataFrame] | None = None,
     path_payments: list[PathPayment] | None = None,
     ring_membership: dict[str, dict] | None = None,
+    prices: pd.DataFrame | None = None,
+    pair: str | None = None,
 ) -> dict:
     """Assemble the full feature vector for `account` as of `as_of`.
 
@@ -562,6 +565,10 @@ def build_feature_vector(
     `liquidity_pools`, `pool_deposits`, and `path_payments` are optional;
     omitting them yields `0.0` for the AMM/path-payment features that depend
     on them.
+
+    `prices` (a `timestamp` + `mid_price`/`price` series for the pair) and
+    `pair` drive the causal PDC features; omitting `prices` yields `0.0` for
+    `pdc_5m`/`pdc_1h`.
     """
     order_book_events = order_book_events if order_book_events is not None else pd.DataFrame(columns=["account", "event_type"])
     account_metadata = account_metadata or {}
