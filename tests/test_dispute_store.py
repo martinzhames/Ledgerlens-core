@@ -11,7 +11,7 @@ from detection.dispute_store import submit_dispute, cast_vote, get_dispute
 
 def _use_tmp_db(tmp_path):
     db = tmp_path / "test.db"
-    settings.db_path = str(db)
+    object.__setattr__(settings, "db_path", str(db))
     storage.init_db()
     return str(db)
 
@@ -82,4 +82,3 @@ def test_quorum_triggers_resolution(tmp_path):
     # resolved disputes are immutable
     with pytest.raises(ValueError):
         cast_vote(d.dispute_id, "d" * 64, "reject")
-*** End Patch

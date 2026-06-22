@@ -13,6 +13,7 @@ import time
 from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
+from typing import Optional
 import pandas as pd
 
 from config.settings import settings
@@ -23,6 +24,7 @@ from detection.cross_pair_engine import (
 )
 from detection.drift_monitor import record_scored_features
 from detection.feature_engineering import build_feature_vector
+from detection.feature_store import FeatureStore, WalletFeatureState, update_feature_state, derive_feature_vector
 from detection.graph_engine import build_ring_membership_index, build_transaction_graph, find_wash_rings
 from detection.model_inference import load_models, score_feature_matrix, score_feature_vector
 from detection.path_payment_engine import detect_atomic_circular_routes
@@ -35,6 +37,8 @@ from detection.storage import (
     save_path_payments,
     save_rings,
     save_scores,
+    save_feature_state,
+    promote_cold_to_hot,
 )
 from detection.shap_explainer import explain_score, top_contributing_features
 from ingestion.account_loader import async_load_account_metadata, load_account_metadata
@@ -50,6 +54,59 @@ from ingestion.path_payment_loader import async_load_path_payments, load_path_pa
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ledgerlens.pipeline")
+
+# Global feature store instance
+_feature_store: Optional[FeatureStore] = None
+_last_cold_flush_time = 0.0
+
+
+def _get_feature_store() -> FeatureStore:
+    """Lazy initialization of global feature store."""
+    global _feature_store
+    if _feature_store is None:
+        _feature_store = FeatureStore()
+    return _feature_store
+
+
+def _maybe_flush_feature_store_to_cold() -> None:
+    """Periodically flush hot feature states to cold storage (SQLite)."""
+    global _last_cold_flush_time
+    now = time.time()
+    flush_interval = settings.feature_store_flush_interval_seconds
+    
+    if now - _last_cold_flush_time >= flush_interval:
+        try:
+            fs = _get_feature_store()
+            count = promote_cold_to_hot(fs)
+            if count > 0:
+                logger.debug(f"Promoted {count} feature states from cold to hot storage")
+            _last_cold_flush_time = now
+        except Exception as e:
+            logger.warning(f"Failed to flush feature store to cold storage: {e}")
+
+
+def adjust_score_with_temporal(account: str, pair_key: str, score: RiskScore, models: dict) -> None:
+    temporal_model = models.get("temporal_lstm")
+    if temporal_model is None:
+        return
+
+    from detection.temporal_dataset import build_score_sequences, get_daily_history
+    from detection.temporal_model import predict_temporal_risk
+    from detection.risk_score import temporal_risk_adjustment
+
+    daily_history = get_daily_history(settings.db_path, account)
+    history_days = len(daily_history)
+
+    if history_days >= 7:
+        seqs = build_score_sequences(settings.db_path, account)
+        if len(seqs) > 0:
+            temporal_prob = predict_temporal_risk(temporal_model, seqs[-1])
+            score.score = temporal_risk_adjustment(
+                snapshot_score=score.score,
+                temporal_score=temporal_prob,
+                history_days=history_days,
+                temporal_weight=settings.temporal_weight,
+            )
 
 
 def run(
@@ -163,9 +220,10 @@ def run(
                 benford_mad_threshold=settings.benford_mad_threshold,
                 ml_probability=probability,
                 ml_confidence=confidence,
-                benford_copula_pval=features.get("benford_copula_pval", 1.0),
-                benford_copula_weight=settings.benford_copula_weight,
+                pdc_score=features.get("pdc_5m", 0.0),
+                pdc_discount_weight=settings.pdc_discount_weight,
             )
+            adjust_score_with_temporal(account, pair_key, score, models)
             scores.append(score)
             scored_features.append(features)
             scored_wallets.append(account)
@@ -340,9 +398,10 @@ async def async_run(
                     benford_mad_threshold=settings.benford_mad_threshold,
                     ml_probability=probability,
                     ml_confidence=confidence,
-                    benford_copula_pval=features.get("benford_copula_pval", 1.0),
-                    benford_copula_weight=settings.benford_copula_weight,
+                    pdc_score=features.get("pdc_5m", 0.0),
+                    pdc_discount_weight=settings.pdc_discount_weight,
                 )
+                adjust_score_with_temporal(account, pair_key, score, models)
                 scores.append(score)
                 scored_features.append(features)
                 scored_wallets.append(account)
@@ -462,9 +521,10 @@ def _flush_streaming_buffer(
             benford_mad_threshold=settings.benford_mad_threshold,
             ml_probability=probability,
             ml_confidence=confidence,
-            benford_copula_pval=features.get("benford_copula_pval", 1.0),
-            benford_copula_weight=settings.benford_copula_weight,
+            pdc_score=features.get("pdc_5m", 0.0),
+            pdc_discount_weight=settings.pdc_discount_weight,
         )
+        adjust_score_with_temporal(account, pair_key, score, models)
         scores.append(score)
         scored_features.append(features)
         scored_wallets.append(account)

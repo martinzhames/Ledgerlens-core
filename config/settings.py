@@ -25,6 +25,15 @@ class Settings:
     ensemble_weight_rf: float = field(default_factory=lambda: float(os.getenv("ENSEMBLE_WEIGHT_RF", "0.25")))
     ensemble_weight_xgb: float = field(default_factory=lambda: float(os.getenv("ENSEMBLE_WEIGHT_XGB", "0.50")))
     ensemble_weight_lgbm: float = field(default_factory=lambda: float(os.getenv("ENSEMBLE_WEIGHT_LGBM", "0.25")))
+    temporal_weight: float = field(default_factory=lambda: float(os.getenv("TEMPORAL_WEIGHT", "0.3")))
+    _runtime_cache_ttl_seconds: int = field(default_factory=lambda: int(os.getenv("RUNTIME_CONFIG_TTL_SECONDS", "60")))
+
+    # Fraction of the composite risk score driven by the sandwich-attack signal
+    # (see detection.risk_score.RiskScore.combine). 0.0 preserves the legacy
+    # benford/ML-only blend.
+    sandwich_score_weight: float = field(
+        default_factory=lambda: float(os.getenv("SANDWICH_SCORE_WEIGHT", "0.0"))
+    )
 
     # Fraction of the composite risk score driven by the multivariate (cross-pair)
     # Benford copula dependence signal (see detection.risk_score.RiskScore.combine).
@@ -35,6 +44,16 @@ class Settings:
 
     model_dir: str = field(default_factory=lambda: os.getenv("MODEL_DIR", "./models"))
     db_path: str = field(default_factory=lambda: os.getenv("LEDGERLENS_DB_PATH", "./ledgerlens.db"))
+
+    # Feature Store (Redis hot layer + SQLite cold layer)
+    redis_url: str = field(default_factory=lambda: os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+    feature_store_ttl_hours: int = field(default_factory=lambda: int(os.getenv("FEATURE_STORE_TTL_HOURS", "48")))
+    feature_store_flush_interval_seconds: int = (
+        field(default_factory=lambda: int(os.getenv("FEATURE_STORE_FLUSH_INTERVAL_SECONDS", "300")))
+    )
+
+    # Streaming
+    cursor_path: str = field(default_factory=lambda: os.getenv("CURSOR_PATH", "./horizon_cursor.txt"))
 
     ledgerlens_api_url: str = field(default_factory=lambda: os.getenv("LEDGERLENS_API_URL", "http://localhost:8000"))
     score_contract_id: str = field(default_factory=lambda: os.getenv("LEDGERLENS_SCORE_CONTRACT_ID", ""))
@@ -148,5 +167,9 @@ def get_runtime_risk_score_threshold() -> int:
 def runtime_risk_score_threshold(self) -> int:  # type: ignore
     return get_runtime_risk_score_threshold()
 
-# Monkeypatch onto settings instance for attribute access
+@runtime_risk_score_threshold.setter
+def runtime_risk_score_threshold(self, value: int) -> None:
+    object.__setattr__(self, "_default_risk_score_threshold", value)
+
+# Monkeypatch onto Settings instance for attribute access
 setattr(Settings, "risk_score_threshold", runtime_risk_score_threshold)

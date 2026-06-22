@@ -20,7 +20,7 @@ class DummyModel:
 
 
 def make_models():
-    return {"dummy": DummyModel(w=5.0, b=-1.0)}
+    return {"dummy": DummyModel(w=0.5, b=-51.0)}
 
 
 def base_vector():

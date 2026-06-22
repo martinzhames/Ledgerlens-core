@@ -1,13 +1,42 @@
 import os
+from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 
 from cli import app, robustness_eval
+from detection.robustness_eval import RobustnessReport
+
+
+def _fake_report(**_kwargs):
+    """Return a minimal RobustnessReport without running the real pipeline."""
+    return RobustnessReport(
+        model_version="test",
+        asr={"0.05": 0.0, "0.10": 0.0, "0.20": 0.0},
+        mean_map=0.0,
+        p95_map=0.0,
+        certified_radius=0.0,
+        n_samples=10,
+        epsilon=0.05,
+    )
 
 
 def test_cli_robustness_eval_runs():
-    # run a short evaluation to ensure it exits without error
-    robustness_eval(epsilon=0.05, steps=5, n_samples=10)
+    """Verify the CLI command runs end-to-end without error.
+
+    The heavy computation (PGD attacks + randomized smoothing) is exercised by
+    tests/test_robustness_eval.py.  Here we only care that the CLI wiring works.
+
+    All imports inside robustness_eval() are lazy/local, so we must patch them
+    at their source modules rather than at the 'cli' namespace.
+    """
+    with patch("detection.robustness_eval.compute_robustness_report", return_value=_fake_report()), \
+         patch("detection.model_inference.load_models", return_value={}), \
+         patch("ingestion.synthetic_data.generate_synthetic_dataset",
+               return_value=([], {}, [], {})), \
+         patch("detection.dataset.build_training_dataset", return_value=MagicMock(
+             sample=lambda n, random_state=None: MagicMock()
+         )):
+        robustness_eval(epsilon=0.05, steps=5, n_samples=10)
 
 runner = CliRunner()
 
