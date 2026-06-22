@@ -29,7 +29,39 @@ def _split_features_labels(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
     return X, y
 
 
-def train_ensemble(df: pd.DataFrame, random_state: int = 42, adversarial_augment: bool = True, adversarial_hardening: bool = False) -> dict:
+def merge_evasion_samples(df: pd.DataFrame, evasion_samples, label_value: int = 1) -> pd.DataFrame:
+    """Fold red team evasion feature vectors into a training DataFrame as positives.
+
+    ``evasion_samples`` is an iterable of feature dicts (or evasion-event dicts
+    carrying an ``evasion_features`` member, as produced by
+    :mod:`detection.red_team.evasion_logger`).  Each is appended with a synthetic
+    ground-truth ``label`` of ``label_value`` (high risk by default), so the
+    discovered evasions are learned as hard positives on the next training run.
+    """
+    if not evasion_samples:
+        return df
+    rows = []
+    for sample in evasion_samples:
+        features = sample.get("evasion_features", sample) if isinstance(sample, dict) else sample
+        row = {f: float(features.get(f, 0.0)) for f in FEATURE_NAMES}
+        row["label"] = label_value
+        rows.append(row)
+    if not rows:
+        return df
+    return pd.concat([df, pd.DataFrame(rows)], ignore_index=True)
+
+
+def load_evasion_samples_for_training(threshold=None, db_path: str | None = None) -> list[dict]:
+    """Return successful-evasion feature dicts from the red team log for retraining."""
+    from detection.red_team import EVASION_THRESHOLD
+    from detection.red_team.evasion_logger import get_evasion_events
+
+    thr = EVASION_THRESHOLD if threshold is None else threshold
+    events = get_evasion_events(only_evasions=True, db_path=db_path)
+    return [e["evasion_features"] for e in events if e["evasion_score"] < thr]
+
+
+def train_ensemble(df: pd.DataFrame, random_state: int = 42, adversarial_augment: bool = True, adversarial_hardening: bool = False, evasion_samples=None) -> dict:
     """Train RF, XGBoost, and LightGBM classifiers on `df` and return metrics + models.
 
     Applies SMOTE to the training split to address class imbalance, since
@@ -38,7 +70,12 @@ def train_ensemble(df: pd.DataFrame, random_state: int = 42, adversarial_augment
     When ``adversarial_augment=True``, generates 3 additional datasets with
     mixed evasion strategies and concatenates them before SMOTE resampling,
     forcing the models to learn adversarial meta-signatures.
+
+    ``evasion_samples`` optionally injects red team evasions
+    (:func:`load_evasion_samples_for_training`) as high-risk positives so the
+    model is hardened against the latest discovered evasion strategies.
     """
+    df = merge_evasion_samples(df, evasion_samples)
     if adversarial_augment:
         from detection.dataset import build_training_dataset
         from ingestion.adversarial_data import ALL_STRATEGIES, generate_adversarial_dataset

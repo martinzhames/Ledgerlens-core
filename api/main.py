@@ -472,6 +472,19 @@ def robustness_report() -> dict:
     return report
 
 
+@app.get("/api/v1/model/robustness")
+def model_robustness() -> dict:
+    """Return live red team robustness metrics for the current model.
+
+    Summarises the continuous adversarial loop (`detection.red_team`):
+    ``evasion_rate_24h``, ``mean_generations_to_evade``, and ``hardening_delta``
+    (change in evasion rate before/after the most recent retrain).
+    """
+    from detection.robustness_eval import live_robustness_metrics
+
+    return live_robustness_metrics()
+
+
 @app.get("/admin/retrain-runs", dependencies=[Depends(require_admin_key)])
 def retrain_runs(
     limit: int = Query(default=50, ge=1, le=1000),
