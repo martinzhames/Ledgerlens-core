@@ -76,6 +76,9 @@ class Settings:
         )
     )
     admin_api_key: str = field(default_factory=lambda: os.getenv("LEDGERLENS_ADMIN_API_KEY", ""))
+    # Separate key scope gating the regulatory `/compliance/` endpoints so that
+    # SAR / Travel-Rule exports are never reachable with the admin key alone.
+    compliance_api_key: str = field(default_factory=lambda: os.getenv("LEDGERLENS_COMPLIANCE_API_KEY", ""))
     model_signing_key: str = field(default_factory=lambda: os.getenv("LEDGERLENS_MODEL_SIGNING_KEY", ""))
 
     # Federated Learning
