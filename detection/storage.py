@@ -372,6 +372,27 @@ _MIGRATIONS: list[tuple[int, str, str]] = [
             ON path_payment_cycles (detected_at);
         """,
     ),
+    (
+        13,
+        "add namespace_id for multi-tenant isolation",
+        """
+        ALTER TABLE risk_scores ADD COLUMN namespace_id TEXT NOT NULL DEFAULT 'default';
+        ALTER TABLE on_chain_submissions ADD COLUMN namespace_id TEXT NOT NULL DEFAULT 'default';
+        ALTER TABLE feature_vectors ADD COLUMN namespace_id TEXT NOT NULL DEFAULT 'default';
+        ALTER TABLE pair_correlations ADD COLUMN namespace_id TEXT NOT NULL DEFAULT 'default';
+        ALTER TABLE alerts ADD COLUMN namespace_id TEXT NOT NULL DEFAULT 'default';
+        ALTER TABLE score_overrides ADD COLUMN namespace_id TEXT NOT NULL DEFAULT 'default';
+        ALTER TABLE score_disputes ADD COLUMN namespace_id TEXT NOT NULL DEFAULT 'default';
+        ALTER TABLE wallet_feature_states ADD COLUMN namespace_id TEXT NOT NULL DEFAULT 'default';
+        ALTER TABLE wash_rings ADD COLUMN namespace_id TEXT NOT NULL DEFAULT 'default';
+        ALTER TABLE circular_path_routes ADD COLUMN namespace_id TEXT NOT NULL DEFAULT 'default';
+        ALTER TABLE path_payment_cycles ADD COLUMN namespace_id TEXT NOT NULL DEFAULT 'default';
+        ALTER TABLE bridge_transfers ADD COLUMN namespace_id TEXT NOT NULL DEFAULT 'default';
+        ALTER TABLE liquidity_pool_trades ADD COLUMN namespace_id TEXT NOT NULL DEFAULT 'default';
+        ALTER TABLE path_payments ADD COLUMN namespace_id TEXT NOT NULL DEFAULT 'default';
+        ALTER TABLE governance_proposals ADD COLUMN namespace_id TEXT NOT NULL DEFAULT 'default';
+        """,
+    ),
 ]
 
 

@@ -31,6 +31,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from api.auth import require_admin_key, require_compliance_key
+from api.namespace import namespace_filter, list_namespaces
 from config.settings import settings
 from detection.amm_engine import pool_risk_from_trade_rows
 from detection.feedback_store import ScoringFeedback, record_feedback
@@ -575,6 +576,17 @@ def federated_audit_log(
     """Return the most recent federated-round audit records (participant IDs are SHA-256 hashed)."""
     from detection.federated.audit import get_audit_records
     return get_audit_records(limit=limit)
+
+
+@app.get("/admin/namespaces", dependencies=[Depends(require_admin_key)])
+def admin_namespaces() -> list[dict]:
+    """Return every namespace with per-table record counts.
+
+    Admin-only (requires the ``LEDGERLENS_ADMIN_API_KEY`` header).
+    Gated by `require_admin_key` — the admin wildcard API key is
+    required to see cross-namespace data.
+    """
+    return list_namespaces()
 
 
 # ---------------------------------------------------------------------------

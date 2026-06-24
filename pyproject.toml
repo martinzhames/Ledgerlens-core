@@ -3,6 +3,16 @@ name = "ledgerlens-core"
 version = "0.1.0"
 description = "Benford's Law + ensemble ML wash-trading detection engine for the Stellar DEX"
 requires-python = ">=3.10"
+authors = [
+    { name = "LedgerLens Contributors" },
+]
+license = { text = "MIT" }
+readme = "README.md"
+
+[project.urls]
+Homepage = "https://github.com/Ledger-Lenz/Ledgerlens-core"
+Repository = "https://github.com/Ledger-Lenz/Ledgerlens-core.git"
+Changelog = "https://github.com/Ledger-Lenz/Ledgerlens-core/blob/main/CHANGELOG.md"
 
 [project.scripts]
 ledgerlens = "cli:app"

@@ -12,12 +12,42 @@ otherwise run as separate scripts/modules:
 
 import logging
 import os
+import tomllib
+from pathlib import Path
 
 import typer
+
+try:
+    _version_file = Path(__file__).resolve().parent / "pyproject.toml"
+    with open(_version_file, "rb") as _vf:
+        __version__ = tomllib.load(_vf)["project"]["version"]
+except Exception:
+    __version__ = "0.0.0"
 
 app = typer.Typer(help="LedgerLens detection engine CLI")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ledgerlens.cli")
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f"ledgerlens-core v{__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _main_callback(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-V",
+        help="Show the version and exit.",
+        callback=_version_callback,
+        is_eager=True,
+    ),
+) -> None:
+    """LedgerLens detection engine CLI."""
+    pass
 
 
 @app.command("generate-data")

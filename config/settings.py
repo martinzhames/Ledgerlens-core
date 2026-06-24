@@ -82,6 +82,12 @@ class Settings:
             if o.strip()
         )
     )
+    # Multi-tenant namespace isolation
+    # Set LEDGERLENS_MULTI_TENANT_ENABLED=true in .env to activate namespace-based
+    # data isolation for white-label exchange partner deployments.
+    is_multi_tenant_enabled: bool = field(
+        default_factory=lambda: os.getenv("LEDGERLENS_MULTI_TENANT_ENABLED", "false").lower() in ("1", "true", "yes")
+    )
     admin_api_key: str = field(default_factory=lambda: os.getenv("LEDGERLENS_ADMIN_API_KEY", ""))
     # Separate key scope gating the regulatory `/compliance/` endpoints so that
     # SAR / Travel-Rule exports are never reachable with the admin key alone.
