@@ -20,6 +20,12 @@ All notable changes to `ledgerlens-core` are documented in this file.
 - **Curve adapter** (`ingestion/curve_adapter.py`): Ingests TokenExchange events
   from Curve StableSwap pools for cross-chain wash-cycle detection.
 - Feature flags `INGEST_UNISWAP` and `INGEST_CURVE` for opt-in DEX ingestion.
+- **Shadow model scoring** (`detection/shadow_scorer.py`): Run a candidate
+  model in parallel with production, logging divergence to Prometheus and
+  SQLite without affecting API responses.
+- `GET /admin/shadow/report` endpoint returning mean/p95 divergence and
+  high-divergence wallets.
+- `SHADOW_MODEL_VERSION` and `SHADOW_MODEL_DIR` configuration.
 - Synthetic SDEX trade generator (`ingestion/synthetic_data.py`) with
   labelled wash-trading rings for local training and testing.
 - Labelled training dataset builder (`detection/dataset.py`).

@@ -127,6 +127,14 @@ class Settings:
     )
 
     # EVM cross-chain detection
+    # Shadow model scoring
+    shadow_model_version: str = field(
+        default_factory=lambda: os.getenv("SHADOW_MODEL_VERSION", "")
+    )
+    shadow_model_dir: str = field(
+        default_factory=lambda: os.getenv("SHADOW_MODEL_DIR", "")
+    )
+
     # DEX swap ingestion feature flags
     ingest_uniswap: bool = field(
         default_factory=lambda: os.getenv("INGEST_UNISWAP", "false").lower() in ("true", "1", "yes")
