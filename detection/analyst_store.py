@@ -7,12 +7,9 @@ active learning loop via GET /analyst/feedback?since=<ISO_TIMESTAMP>.
 
 from __future__ import annotations
 
-import json
-import sqlite3
 from datetime import datetime, timezone, timedelta
 from typing import Literal
 
-from config.settings import settings
 from detection.storage import _connect, init_db
 
 VerdictType = Literal["confirmed_wash", "false_positive", "needs_review"]

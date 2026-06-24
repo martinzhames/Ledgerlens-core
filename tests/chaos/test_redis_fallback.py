@@ -44,7 +44,7 @@ def _make_feature_store(redis_url: str):
 def test_redis_refused_falls_back_to_cold_tier(toxiproxy, redis_proxy):
     """Feature store falls back to cold tier without error when Redis is unavailable."""
     from datetime import datetime, timezone
-    from detection.feature_store import FeatureStore, WalletFeatureState
+    from detection.feature_store import WalletFeatureState
 
     # Disable Redis proxy to simulate connection refused
     toxiproxy.disable_proxy(redis_proxy)
@@ -74,8 +74,6 @@ def test_redis_refused_falls_back_to_cold_tier(toxiproxy, redis_proxy):
 
 def test_redis_fallback_no_data_loss_on_get(toxiproxy, redis_proxy):
     """get_state returns None gracefully when Redis is down and state was never cold-stored."""
-    from detection.feature_store import FeatureStore
-
     toxiproxy.disable_proxy(redis_proxy)
     try:
         store = _make_feature_store(f"redis://localhost:{REDIS_LISTEN.split(':')[1]}/0")

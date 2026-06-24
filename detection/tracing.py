@@ -41,7 +41,6 @@ try:
     from opentelemetry.sdk.resources import SERVICE_NAME, Resource
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
-    from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
     _OTEL_AVAILABLE = True
 except ImportError:

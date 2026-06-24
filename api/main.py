@@ -37,7 +37,6 @@ from detection.tracing import (
     configure_tracing,
     extract_context_from_headers,
     get_tracer,
-    propagate_context_to_headers,
     start_span,
 )
 from detection.amm_engine import pool_risk_from_trade_rows
@@ -138,12 +137,11 @@ _tracer = get_tracer("ledgerlens.api")
 @app.middleware("http")
 async def _trace_middleware(request: Request, call_next):
     """Extract W3C traceparent from inbound requests and start a root span."""
-    ctx = extract_context_from_headers(dict(request.headers))
+    extract_context_from_headers(dict(request.headers))
     tracer = get_tracer("ledgerlens.api")
     span_name = f"{request.method} {request.url.path}"
     with tracer.start_as_current_span(span_name) as span:
         try:
-            from opentelemetry.trace import SpanKind  # type: ignore
             span.set_attribute("http.method", request.method)
             span.set_attribute("http.url", str(request.url))
         except Exception:

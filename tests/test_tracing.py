@@ -147,7 +147,6 @@ def test_nested_spans_share_trace_id(in_memory_tracer):
 def test_propagate_and_extract_traceparent(in_memory_tracer):
     """W3C traceparent injected into headers can be extracted back."""
     from detection.tracing import extract_context_from_headers, propagate_context_to_headers, start_span
-    from opentelemetry import context as otel_context, trace
 
     headers = {}
     with start_span("outbound.http"):
@@ -156,7 +155,6 @@ def test_propagate_and_extract_traceparent(in_memory_tracer):
     assert "traceparent" in headers, (
         f"traceparent header not injected: {headers}"
     )
-    # Extract the context back
     extracted = extract_context_from_headers(headers)
     assert extracted is not None
 
