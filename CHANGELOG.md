@@ -26,6 +26,9 @@ All notable changes to `ledgerlens-core` are documented in this file.
 - `GET /admin/shadow/report` endpoint returning mean/p95 divergence and
   high-divergence wallets.
 - `SHADOW_MODEL_VERSION` and `SHADOW_MODEL_DIR` configuration.
+- **End-to-end test suite** (`tests/e2e/`): Full-stack integration tests
+  covering ingest-score-retrieve, alert flow, and federated training round.
+  Run with `make test-e2e`; designed to complete in under 5 minutes.
 - Synthetic SDEX trade generator (`ingestion/synthetic_data.py`) with
   labelled wash-trading rings for local training and testing.
 - Labelled training dataset builder (`detection/dataset.py`).
