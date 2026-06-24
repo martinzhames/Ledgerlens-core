@@ -13,6 +13,7 @@ pythonpath = ["."]
 asyncio_mode = "auto"
 markers = [
     "benchmark: performance benchmarks (excluded from standard CI; run with -m benchmark)",
+    "e2e: end-to-end integration tests (run with make test-e2e)",
 ]
 filterwarnings = [
     "ignore::UserWarning:sklearn.utils.parallel",

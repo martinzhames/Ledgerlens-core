@@ -559,6 +559,24 @@ def model_robustness() -> dict:
     return live_robustness_metrics()
 
 
+@app.get("/admin/shadow/report", dependencies=[Depends(require_admin_key)])
+def shadow_report() -> dict:
+    """Return shadow model scoring divergence report.
+
+    Shows mean divergence, p95 divergence, and wallets where the shadow
+    model score diverges from production by more than 20 points.
+    """
+    from detection.shadow_scorer import get_shadow_report
+
+    report = get_shadow_report(divergence_threshold=20.0)
+    if report["sample_count"] == 0:
+        raise HTTPException(
+            status_code=404,
+            detail="No shadow scores recorded. Set SHADOW_MODEL_VERSION to enable.",
+        )
+    return report
+
+
 @app.get("/admin/retrain-runs", dependencies=[Depends(require_admin_key)])
 def retrain_runs(
     limit: int = Query(default=50, ge=1, le=1000),

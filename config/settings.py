@@ -88,6 +88,12 @@ class Settings:
     compliance_api_key: str = field(default_factory=lambda: os.getenv("LEDGERLENS_COMPLIANCE_API_KEY", ""))
     model_signing_key: str = field(default_factory=lambda: os.getenv("LEDGERLENS_MODEL_SIGNING_KEY", ""))
 
+    # ED25519 public key for model artifact signing (base64-encoded 32 bytes).
+    # Generate with: python cli.py generate-signing-key
+    model_signing_public_key: str = field(
+        default_factory=lambda: os.getenv("MODEL_SIGNING_PUBLIC_KEY", "")
+    )
+
     # Federated Learning
     federated_min_participants: int = field(
         default_factory=lambda: int(os.getenv("FEDERATED_MIN_PARTICIPANTS", "3"))
@@ -121,6 +127,22 @@ class Settings:
     )
 
     # EVM cross-chain detection
+    # Shadow model scoring
+    shadow_model_version: str = field(
+        default_factory=lambda: os.getenv("SHADOW_MODEL_VERSION", "")
+    )
+    shadow_model_dir: str = field(
+        default_factory=lambda: os.getenv("SHADOW_MODEL_DIR", "")
+    )
+
+    # DEX swap ingestion feature flags
+    ingest_uniswap: bool = field(
+        default_factory=lambda: os.getenv("INGEST_UNISWAP", "false").lower() in ("true", "1", "yes")
+    )
+    ingest_curve: bool = field(
+        default_factory=lambda: os.getenv("INGEST_CURVE", "false").lower() in ("true", "1", "yes")
+    )
+
     evm_rpc_ethereum: str = field(
         default_factory=lambda: os.getenv("EVM_RPC_ETHEREUM", "https://eth.llamarpc.com")
     )

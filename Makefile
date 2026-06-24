@@ -1,10 +1,13 @@
-.PHONY: install test lint generate-data train serve
+.PHONY: install test test-e2e lint generate-data train serve
 
 install:
 	pip install -r requirements.txt
 
 test:
-	pytest
+	pytest --ignore=tests/e2e
+
+test-e2e:
+	pytest tests/e2e -m e2e -v --timeout=300
 
 lint:
 	ruff check .
