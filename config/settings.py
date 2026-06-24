@@ -88,6 +88,12 @@ class Settings:
     compliance_api_key: str = field(default_factory=lambda: os.getenv("LEDGERLENS_COMPLIANCE_API_KEY", ""))
     model_signing_key: str = field(default_factory=lambda: os.getenv("LEDGERLENS_MODEL_SIGNING_KEY", ""))
 
+    # ED25519 public key for model artifact signing (base64-encoded 32 bytes).
+    # Generate with: python cli.py generate-signing-key
+    model_signing_public_key: str = field(
+        default_factory=lambda: os.getenv("MODEL_SIGNING_PUBLIC_KEY", "")
+    )
+
     # Federated Learning
     federated_min_participants: int = field(
         default_factory=lambda: int(os.getenv("FEDERATED_MIN_PARTICIPANTS", "3"))
