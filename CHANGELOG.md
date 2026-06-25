@@ -12,6 +12,11 @@ commit, generates this file, and publishes a tagged Docker image to GHCR.
 ## Unreleased
 
 ### Added
+- **ED25519 model signing** (`detection/model_signing.py`): `ModelSigner` class with asymmetric ED25519 sign/verify for `.joblib` model artifacts, preventing supply-chain attacks via tampered model files. Public key in `config/settings.py`; private key loaded from `MODEL_SIGNING_PRIVATE_KEY` environment variable only.
+- CLI commands `generate-signing-key` and `verify-models` for keypair generation and batch signature verification.
+- `docs/model_signing.md`: threat model, key management, rotation procedure, CI integration guide.
+
+### Added
 - **#147** Pedersen commitment ZK scheme (`detection/zk_commitment.py`): `PedersenParams`, `PedersenCommitment`, `ThresholdProof` dataclasses; `commit()`, `open()`, `prove_below_threshold()`, `verify_below_threshold()` functions over BN254 for privacy-preserving score attestation.
 - **#147** API endpoints `POST /scores/{wallet}/commit` and `POST /scores/verify-threshold` for ZK threshold proofs.
 - **#150** Full governance proposal engine (`detection/governance.py`): `GovernanceEngine` with `submit_proposal`, `cast_vote`, `tally_proposal`, `close_proposal`, `execute_proposal`, `close_expired`; `SettingsReloader` with compile-time allowlist and atomic `.env` write.
