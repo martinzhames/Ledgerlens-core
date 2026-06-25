@@ -5,6 +5,7 @@ import os
 import sqlite3
 import uuid
 from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
@@ -12,6 +13,7 @@ from pydantic import BaseModel
 from api.auth import require_admin_key
 from config.settings import settings, _runtime_cache
 from detection.model_registry import get_current_version, list_model_versions
+from detection.suppressions import SuppressionsStore
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin_key)])
 
@@ -178,3 +180,44 @@ def trigger_retrain(background_tasks: BackgroundTasks) -> dict:
     job_id = str(uuid.uuid4())
     background_tasks.add_task(_run_retrain, job_id)
     return {"job_id": job_id, "status": "queued"}
+
+
+# ---------------------------------------------------------------------------
+# Suppression rules  (Issue #178)
+# ---------------------------------------------------------------------------
+
+
+class SuppressionCreate(BaseModel):
+    wallet: str
+    reason: str
+    expires_at: Optional[str] = None
+
+
+@router.post("/suppressions", include_in_schema=False, status_code=201)
+def add_suppression(body: SuppressionCreate) -> dict:
+    """Add an alert suppression rule for a wallet."""
+    from storage.audit_log import log_suppression_rule_added
+
+    store = SuppressionsStore()
+    rule = store.add(wallet=body.wallet, reason=body.reason, expires_at=body.expires_at)
+    log_suppression_rule_added(actor="admin")
+    return rule
+
+
+@router.get("/suppressions", include_in_schema=False)
+def list_suppressions() -> list[dict]:
+    """List all active (non-expired) suppression rules."""
+    return SuppressionsStore().list_active()
+
+
+@router.delete("/suppressions/{rule_id}", include_in_schema=False)
+def delete_suppression(rule_id: int) -> dict:
+    """Remove a suppression rule by ID."""
+    from storage.audit_log import log_suppression_rule_removed
+
+    store = SuppressionsStore()
+    deleted = store.delete(rule_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Suppression rule {rule_id} not found")
+    log_suppression_rule_removed(actor="admin")
+    return {"deleted": rule_id}
