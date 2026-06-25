@@ -18,11 +18,38 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 import config.settings as settings_module
+from detection.benford_engine import BenfordStreamCounter
 from detection.feature_engineering import FEATURE_NAMES
 from detection.gnn_model import _HAS_PYG, safe_load_gnn_checkpoint
 from detection.model_signing import assert_within_model_dir, safe_joblib_load
 
 logger = logging.getLogger("ledgerlens.model_inference")
+
+# ---------------------------------------------------------------------------
+# Per-wallet streaming Benford counters
+# ---------------------------------------------------------------------------
+# Maps wallet -> BenfordStreamCounter for incremental Benford feature extraction.
+# Populated lazily via ingest_trade(); safe for single-threaded use.
+_wallet_counters: dict[str, BenfordStreamCounter] = {}
+_DEFAULT_WINDOWS: list[int] = [100, 500, 1000]
+
+
+def ingest_trade(wallet: str, amount: float, windows: list[int] | None = None) -> None:
+    """Update the Benford stream counter for *wallet* with *amount*.
+
+    Creates the counter on first call for each wallet.  O(len(windows)).
+    """
+    if wallet not in _wallet_counters:
+        _wallet_counters[wallet] = BenfordStreamCounter(windows or _DEFAULT_WINDOWS)
+    _wallet_counters[wallet].update(amount)
+
+
+def get_benford_stats(wallet: str, window: int):
+    """Return BenfordStats for *wallet* at *window*, or None if no trades seen."""
+    counter = _wallet_counters.get(wallet)
+    if counter is None:
+        return None
+    return counter.window_stats(window)
 
 _WEIGHTS_FILENAME = "ensemble_weights.json"
 _REQUIRED_KEYS = frozenset({"random_forest", "xgboost", "lightgbm"})
